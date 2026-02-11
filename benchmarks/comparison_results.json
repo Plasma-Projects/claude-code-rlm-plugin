@@ -1,0 +1,48 @@
+{
+  "timestamp": 1770837048.879597,
+  "summary": {
+    "files_tested": 3,
+    "avg_token_reduction_percent": 94.45319084041427,
+    "total_tokens_saved": 2681171,
+    "avg_speedup": 0.02799561267734707,
+    "context_fit_improvement": 3
+  },
+  "detailed_results": [
+    {
+      "file": "large_dataset.json",
+      "file_size_kb": 3468.2998046875,
+      "token_savings": 94.73692509381856,
+      "tokens_saved": 841154,
+      "context_window_fit": {
+        "without_rlm": false,
+        "with_rlm": true
+      },
+      "chunks_created": 19,
+      "processing_speedup": 0.011410636075782802
+    },
+    {
+      "file": "large_dataset.csv",
+      "file_size_kb": 2388.3896484375,
+      "token_savings": 89.93840477753807,
+      "tokens_saved": 546535,
+      "context_window_fit": {
+        "without_rlm": false,
+        "with_rlm": true
+      },
+      "chunks_created": 10,
+      "processing_speedup": 0.0375670026095154
+    },
+    {
+      "file": "application.log",
+      "file_size_kb": 5120.0322265625,
+      "token_savings": 98.68424264988617,
+      "tokens_saved": 1293482,
+      "context_window_fit": {
+        "without_rlm": false,
+        "with_rlm": true
+      },
+      "chunks_created": 76,
+      "processing_speedup": 0.03500919934674302
+    }
+  ]
+}

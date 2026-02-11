@@ -73,12 +73,12 @@ class TimeWindowSplitting:
                         'type': 'time_window',
                         'start_time': chunk_start_time,
                         'end_time': chunk_end_time,
-                        'content': '\n'.join(current_chunk),
+                        'content': '\n'.join(current_chunk[-10:] if isinstance(current_chunk[-1], str) else current_chunk),
                         'line_count': len(current_chunk),
                         'size': sum(len(l) + 1 for l in current_chunk)
                     })
                     
-                    current_chunk = [current_chunk[-10:]]  if len(current_chunk) > 10 else []
+                    current_chunk = current_chunk[-10:] if len(current_chunk) > 10 else []
                     chunk_start_time = timestamp
                 
                 current_timestamp = timestamp
