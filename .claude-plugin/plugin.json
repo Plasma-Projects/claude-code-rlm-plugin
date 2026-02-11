@@ -1,0 +1,35 @@
+{
+  "name": "recursive-language-model",
+  "version": "1.0.0",
+  "description": "RLM plugin for processing massive contexts with recursive decomposition",
+  "author": "Claude Code Community",
+  "entry": "src/__init__.py",
+  "dependencies": {
+    "python": ">=3.9"
+  },
+  "configuration": {
+    "auto_trigger": {
+      "file_size_kb": 50,
+      "token_count": 100000,
+      "file_count": 10,
+      "enabled": true
+    },
+    "processing": {
+      "max_concurrent_agents": 8,
+      "chunk_overlap_percent": 10,
+      "recursion_depth_limit": 2,
+      "temp_cleanup": true
+    },
+    "models": {
+      "extraction": "haiku",
+      "analysis": "sonnet",
+      "orchestration": "sonnet"
+    }
+  },
+  "permissions": [
+    "file_system_read",
+    "file_system_write",
+    "subprocess_execute",
+    "llm_query"
+  ]
+}
