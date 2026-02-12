@@ -193,13 +193,33 @@ class RLMREPLEngine:
         llm_fn = self.namespace['llm_query']
         return llm_fn(query, context=str(chunk.get('content', '')))
     
-    def _aggregate(self, results: list) -> Any:
-        """Aggregate results from multiple chunks"""
+    def _aggregate(self, results: list, query: str = None) -> Any:
+        """Aggregate results from multiple chunks with optional synthesis.
+
+        If a query is provided and multiple string results exist, runs an LLM
+        synthesis pass to merge chunk-level findings into a unified answer.
+        """
         if not results:
             return None
-        
+
         if all(isinstance(r, str) for r in results):
-            return '\n'.join(results)
+            raw = '\n'.join(results)
+
+            # Semantic synthesis when we have a query and real LLM results
+            if (query
+                and len(results) > 1
+                and not all('[Fallback' in r for r in results)):
+                llm_fn = self.namespace['llm_query']
+                synthesis_prompt = (
+                    f"Synthesize these {len(results)} chunk findings into one answer.\n"
+                    f"QUERY: {query}\n\nFINDINGS:\n{raw[:50000]}\n\nSYNTHESIZED ANSWER:"
+                )
+                try:
+                    return llm_fn(synthesis_prompt, model="sonnet")
+                except Exception:
+                    pass  # fall through to raw concatenation
+
+            return raw
         elif all(isinstance(r, dict) for r in results):
             aggregated = {}
             for r in results:
