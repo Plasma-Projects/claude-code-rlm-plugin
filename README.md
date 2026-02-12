@@ -52,15 +52,15 @@ Notes:
 
 Decomposition time (seconds):
 
-![Decomposition Time](assets/benchmarks/decomposition_time.png)
+![Decomposition Time](assets/benchmarks/decomposition_time.svg)
 
 Query processing time (seconds):
 
-![Query Processing Time](assets/benchmarks/query_time.png)
+![Query Processing Time](assets/benchmarks/query_time.svg)
 
 Chunks per file:
 
-![Chunks Per File](assets/benchmarks/chunks_per_file.png)
+![Chunks Per File](assets/benchmarks/chunks_per_file.svg)
 
 ### Smaller file tests (test_fixed_plugin.py)
 
