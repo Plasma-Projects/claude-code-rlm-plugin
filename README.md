@@ -191,6 +191,23 @@ python3 test_fixed_plugin.py
 python3 test_real_world_comparison.py
 ```
 
+## Real tokenization per model (optional)
+
+If you want real token counts (not estimates), run:
+
+```
+python3 benchmarks/real_tokenization.py
+```
+
+Notes:
+- OpenAI token counts use local `tiktoken` (no API key required).
+- Anthropic counts use `ANTHROPIC_API_KEY` with `messages.count_tokens`.
+- Gemini counts use `GOOGLE_API_KEY` and `google.generativeai`.
+
+Outputs:
+- `benchmarks/real_tokenization_results.json`
+- `benchmarks/real_tokenization_results.md`
+
 ## License
 
 MIT

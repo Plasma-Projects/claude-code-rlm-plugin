@@ -1,0 +1,76 @@
+{
+  "models": [
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "claude-sonnet-4-5-20250929",
+    "google/gemini-2.5-flash"
+  ],
+  "files": {
+    "benchmarks/test_data/large_dataset.json": {
+      "gpt-4.1": {
+        "tokens": 1077463,
+        "note": "encoding_for_model",
+        "provider": "openai"
+      },
+      "gpt-4.1-mini": {
+        "tokens": 1077463,
+        "note": "encoding_for_model",
+        "provider": "openai"
+      },
+      "claude-sonnet-4-5-20250929": {
+        "tokens": null,
+        "note": "ANTHROPIC_API_KEY not set",
+        "provider": "anthropic"
+      },
+      "google/gemini-2.5-flash": {
+        "tokens": null,
+        "note": "GOOGLE_API_KEY not set",
+        "provider": "google"
+      }
+    },
+    "benchmarks/test_data/application.log": {
+      "gpt-4.1": {
+        "tokens": 1880385,
+        "note": "encoding_for_model",
+        "provider": "openai"
+      },
+      "gpt-4.1-mini": {
+        "tokens": 1880385,
+        "note": "encoding_for_model",
+        "provider": "openai"
+      },
+      "claude-sonnet-4-5-20250929": {
+        "tokens": null,
+        "note": "ANTHROPIC_API_KEY not set",
+        "provider": "anthropic"
+      },
+      "google/gemini-2.5-flash": {
+        "tokens": null,
+        "note": "GOOGLE_API_KEY not set",
+        "provider": "google"
+      }
+    },
+    "benchmarks/test_data/large_dataset.csv": {
+      "gpt-4.1": {
+        "tokens": 1115334,
+        "note": "encoding_for_model",
+        "provider": "openai"
+      },
+      "gpt-4.1-mini": {
+        "tokens": 1115334,
+        "note": "encoding_for_model",
+        "provider": "openai"
+      },
+      "claude-sonnet-4-5-20250929": {
+        "tokens": null,
+        "note": "ANTHROPIC_API_KEY not set",
+        "provider": "anthropic"
+      },
+      "google/gemini-2.5-flash": {
+        "tokens": null,
+        "note": "GOOGLE_API_KEY not set",
+        "provider": "google"
+      }
+    }
+  }
+}
