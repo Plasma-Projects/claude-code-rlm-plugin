@@ -4,9 +4,10 @@ LLM Backend Integration for RLM Plugin
 Priority order for authentication:
 1. ANTHROPIC_API_KEY (direct Anthropic API - fastest)
 2. OPENAI_API_KEY (OpenAI API)
-3. Local models (Ollama, text-generation-webui)
-4. Claude CLI (uses user's Claude Code auth via `claude -p` - zero config)
-5. Rule-based fallback (always available, no LLM)
+3. OPENROUTER_API_KEY (200+ models via single key - best flexibility)
+4. Local models (Ollama, text-generation-webui)
+5. Claude CLI (uses user's Claude Code auth via `claude -p` - zero config)
+6. Rule-based fallback (always available, no LLM)
 
 Inside Claude Code: if no API keys are set, Claude CLI backend activates
 automatically using the user's existing Claude Code session authentication.
@@ -182,6 +183,121 @@ class OpenAIBackend(LLMBackend):
                 provider=self.name,
                 processing_time_ms=(time.time() - start_time) * 1000,
                 error=str(e)
+            )
+
+
+class OpenRouterBackend(LLMBackend):
+    """OpenRouter API backend — access to 200+ models via single key.
+    Uses OpenAI-compatible API at https://openrouter.ai/api/v1.
+    Intelligent model selection: maps haiku/sonnet/opus tiers to best
+    price/performance models available on OpenRouter."""
+
+    # Tiered model selection: cheap/fast → balanced → premium
+    # Each tier has a primary and fallback in case the primary is unavailable
+    MODEL_MAP = {
+        "haiku": "google/gemini-2.5-flash",           # fast, cheap
+        "sonnet": "anthropic/claude-sonnet-4-5",       # balanced
+        "opus": "anthropic/claude-opus-4-6",           # premium
+    }
+
+    # Fallbacks per tier if primary isn't routable
+    MODEL_FALLBACKS = {
+        "haiku": ["google/gemini-2.0-flash-001", "meta-llama/llama-4-maverick"],
+        "sonnet": ["openai/gpt-4.1", "google/gemini-2.5-pro"],
+        "opus": ["anthropic/claude-sonnet-4-5", "openai/gpt-4.1"],
+    }
+
+    def __init__(self, api_key: Optional[str] = None, site_url: Optional[str] = None):
+        self._client = None
+        key = api_key or os.getenv('OPENROUTER_API_KEY')
+        self._site_url = site_url or os.getenv('OPENROUTER_SITE_URL', 'https://github.com/Plasma-Projects/claude-code-rlm-plugin')
+        self._app_name = os.getenv('OPENROUTER_APP_NAME', 'RLM Plugin')
+
+        if key:
+            try:
+                import openai
+                self._client = openai.OpenAI(
+                    api_key=key,
+                    base_url="https://openrouter.ai/api/v1",
+                )
+            except ImportError:
+                logging.warning("openai library not installed. Run: pip install openai")
+
+    @property
+    def name(self) -> str:
+        return "OpenRouter"
+
+    def is_available(self) -> bool:
+        return self._client is not None
+
+    def query(self, prompt: str, model: str = None, **kwargs) -> LLMResponse:
+        if not self.is_available():
+            return LLMResponse(
+                content="", model_used=model or "openrouter",
+                provider=self.name, processing_time_ms=0,
+                error="OpenRouter backend not available — set OPENROUTER_API_KEY"
+            )
+
+        start_time = time.time()
+
+        # Resolve model: abstract tier → OpenRouter model ID
+        # If the user passes a full model ID (contains '/'), use it directly
+        if model and '/' in model:
+            or_model = model
+        else:
+            or_model = self.MODEL_MAP.get(model, self.MODEL_MAP["haiku"])
+
+        extra_headers = {
+            "HTTP-Referer": self._site_url,
+            "X-Title": self._app_name,
+        }
+
+        try:
+            response = self._client.chat.completions.create(
+                model=or_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=kwargs.get('max_tokens', 2000),
+                temperature=kwargs.get('temperature', 0.7),
+                extra_headers=extra_headers,
+            )
+            processing_time = (time.time() - start_time) * 1000
+            return LLMResponse(
+                content=response.choices[0].message.content,
+                model_used=or_model,
+                provider=self.name,
+                processing_time_ms=processing_time,
+                tokens_used=getattr(response.usage, 'total_tokens', None) if response.usage else None
+            )
+        except Exception as e:
+            err_str = str(e)
+            # If model not available, try fallbacks
+            tier = model if model in self.MODEL_FALLBACKS else None
+            if tier and ("not available" in err_str.lower() or "does not exist" in err_str.lower()):
+                for fallback_model in self.MODEL_FALLBACKS[tier]:
+                    try:
+                        response = self._client.chat.completions.create(
+                            model=fallback_model,
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=kwargs.get('max_tokens', 2000),
+                            temperature=kwargs.get('temperature', 0.7),
+                            extra_headers=extra_headers,
+                        )
+                        processing_time = (time.time() - start_time) * 1000
+                        return LLMResponse(
+                            content=response.choices[0].message.content,
+                            model_used=fallback_model,
+                            provider=self.name,
+                            processing_time_ms=processing_time,
+                            tokens_used=getattr(response.usage, 'total_tokens', None) if response.usage else None
+                        )
+                    except Exception:
+                        continue
+
+            return LLMResponse(
+                content="", model_used=or_model,
+                provider=self.name,
+                processing_time_ms=(time.time() - start_time) * 1000,
+                error=err_str
             )
 
 
@@ -424,8 +540,8 @@ class SimpleFallbackBackend(LLMBackend):
         return (
             f"[Fallback] Processed query ({len(prompt)} chars). "
             f"For real LLM analysis, configure one of: "
-            f"CLAUDE_CODE_OAUTH_TOKEN (auto in Claude Code), "
-            f"ANTHROPIC_API_KEY, OPENAI_API_KEY, or local Ollama."
+            f"ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, "
+            f"local Ollama, or run inside Claude Code for auto-auth."
         )
 
 
@@ -435,7 +551,7 @@ class LLMManager:
     def __init__(self, preferred_backends: List[str] = None):
         self.backends: Dict[str, LLMBackend] = {}
         self.preferred_order = preferred_backends or [
-            "anthropic", "openai", "local", "claude_cli", "fallback"
+            "anthropic", "openai", "openrouter", "local", "claude_cli", "fallback"
         ]
         self._initialize_backends()
 
@@ -445,6 +561,9 @@ class LLMManager:
 
         # OpenAI
         self.backends["openai"] = OpenAIBackend()
+
+        # OpenRouter (200+ models via single key)
+        self.backends["openrouter"] = OpenRouterBackend()
 
         # Local models
         local_configs = [
