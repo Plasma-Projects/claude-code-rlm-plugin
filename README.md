@@ -1,73 +1,66 @@
 # RLM Plugin for Claude Code
 
-Map-reduce for LLM context windows. Process files that exceed your model's context limit by chunking, parallel extraction, and semantic synthesis.
+Process data that exceeds an LLM context window by chunking, parallel extraction, and synthesis.
 
-## What this actually does
+## What it does
 
-When a file is too large to fit in a single LLM context window (200K tokens for Claude, ~800KB of text), you can't process it directly. RLM splits it into chunks, runs each chunk through an LLM in parallel, then synthesizes the per-chunk findings into a unified answer.
+RLM breaks large inputs into chunks, runs per-chunk extraction in parallel, then (optionally) runs a synthesis pass to produce a single answer.
 
 ```
-Input (1.2MB JSON, 7864 records)
-  │
-  ├─ Chunk 0 ──→ LLM ──→ "Diana Garcia is first, 169 records here"
-  ├─ Chunk 1 ──→ LLM ──→ "167 records, users 169-335"
-  ├─ ...        (49 chunks in parallel)
-  └─ Chunk 48 ─→ LLM ──→ "John Smith is last, 112 records here"
-  │
-  └─ Synthesis (sonnet) ──→ "7,864 total records. First: Diana Garcia. Last: John Smith."
+Input (large file)
+  |
+  |-- Chunk 0 -> LLM -> per-chunk findings
+  |-- Chunk 1 -> LLM -> per-chunk findings
+  |-- ...
+  `-- Chunk N -> LLM -> per-chunk findings
+  |
+  `-- Synthesis -> unified answer
 ```
 
-## When to use this
+## When to use it
 
-**Use RLM when your content exceeds the context window:**
+Use RLM when the input is too large for a single LLM call:
 
-- JSON files > 800KB
-- CSV datasets > 100K rows
-- Log files > 5MB
-- Codebases with 50+ files to analyze simultaneously
+- JSON/CSV/logs that are hundreds of KB to multiple MB
+- Large codebases or multi-file analysis
 
-**Don't use RLM when content fits in context.** For anything under ~800KB, direct processing is faster, cheaper, and more accurate. There is no token savings — RLM costs 6-26% _more_ tokens due to per-chunk overhead and the synthesis pass.
+Do not use RLM for small inputs. If content fits comfortably in context, direct processing is faster, cheaper, and usually more accurate.
 
-## Honest benchmarks
+## Real results (from an OpenRouter run)
 
-Tested 2026-02-12 against 1.2MB JSON (7864 user records), query: "How many records? First and last user name?"
+These numbers are from a real run on 2026-02-12 using `OPENROUTER_API_KEY` with the default OpenRouter model mapping (haiku tier -> `google/gemini-2.5-flash`). The commands run were:
 
-| Metric           | Result                                                      |
-| ---------------- | ----------------------------------------------------------- |
-| Chunks           | 49 (parallel via OpenRouter)                                |
-| Total time       | 6.2s                                                        |
-| First user found | Diana Garcia (correct)                                      |
-| Last user found  | John Smith (correct)                                        |
-| Record count     | ~2% off (synthesis summed chunks instead of using metadata) |
-| Synthesis model  | claude-sonnet-4-5 via OpenRouter                            |
+```
+python3 test_fixed_plugin.py
+python3 test_real_world_comparison.py
+```
 
-### Token cost comparison
+### Large-file comparison (benchmarks/test_data)
 
-| Scenario              | Input tokens | Ratio | Verdict                              |
-| --------------------- | ------------ | ----- | ------------------------------------ |
-| 1.2MB JSON direct     | 310K         | 1.0x  | **Exceeds 200K window — impossible** |
-| 1.2MB JSON via RLM    | 329K total   | 1.06x | Works, costs 6% more                 |
-| 85KB codebase direct  | 21K          | 1.0x  | Fits in window — use direct          |
-| 85KB codebase via RLM | 27K total    | 1.26x | Unnecessary, 26% more expensive      |
+| File | Size | Strategy | Chunks | Decomp time | Query time |
+| --- | --- | --- | --- | --- | --- |
+| large_dataset.json | 3.4MB | structural_decomp | 19 | 0.042s | 17.700s |
+| application.log | 5.0MB | token_chunking | 117 | 0.020s | 45.880s |
+| large_dataset.csv | 2.3MB | structural_decomp | 10 | 0.873s | 8.798s |
 
-**RLM does not save tokens.** It enables processing content that wouldn't fit otherwise.
+Notes:
+- Decomposition time is measured separately from query time.
+- Decomposition throughput in the test output is based on file size / decomposition time only.
+- Query time depends on backend latency, model speed, and network conditions.
 
-### What works well
+### Smaller file tests (test_fixed_plugin.py)
 
-- Chunking preserves 100% of facts (tested: 6/6 facts across 12 chunks)
-- Boundary detection: first/last items correctly identified across chunks
-- Parallel execution: 49 chunks in 6.2s via OpenRouter
-- Graceful degradation: falls back through 6 backends, never crashes
+- 307,783-byte text file -> `file_chunking`, 15 chunks
+- 360,313-byte JSON -> `structural_decomp`, 15 chunks
+- 1,653-byte code file -> direct query (no chunking)
 
-### Known limitations
+### About token estimates
 
-- Exact counts across chunks can be ~2% off (map-reduce inherent limitation)
-- Claude CLI backend times out when run inside an active Claude Code session
-- Synthesis quality depends on per-chunk extraction quality
+The comparison output shows an estimated token count (~888,000 for the 3.4MB JSON) and a token-per-chunk estimate derived from file size / chunk count. This is an approximation, not a real tokenizer measurement. If you need exact token counts, use a tokenizer for your target model.
 
 ## Setup
 
-```bash
+```
 git clone https://github.com/Plasma-Projects/claude-code-rlm-plugin.git
 cd claude-code-rlm-plugin
 pip install anthropic  # or: pip install openai
@@ -75,8 +68,8 @@ pip install anthropic  # or: pip install openai
 
 ### Authentication (pick one)
 
-```bash
-# Option 1: OpenRouter (recommended — 200+ models, single key)
+```
+# Option 1: OpenRouter (recommended)
 export OPENROUTER_API_KEY="sk-or-v1-..."
 
 # Option 2: Anthropic API
@@ -88,11 +81,11 @@ export OPENAI_API_KEY="sk-..."
 # Option 4: Local (Ollama)
 ollama serve
 
-# Option 5: Inside Claude Code (auto — uses claude CLI subprocess)
-# No config needed, but slow (~5s per chunk)
+# Option 5: Inside Claude Code (auto)
+# No config needed, but slower per chunk
 ```
 
-**Backend priority:** Anthropic > OpenAI > OpenRouter > Local > Claude CLI > Fallback
+Backend priority: Anthropic > OpenAI > OpenRouter > Local > Claude CLI > Fallback
 
 ## Usage
 
@@ -107,7 +100,7 @@ result = rlm.process(
     query="What are the top 10 users by score?"
 )
 
-print(result["synthesis_applied"])  # True
+print(result["synthesis_applied"])  # True or False
 print(result["result"]["aggregated"])  # Unified answer
 
 # Process content string
@@ -120,6 +113,15 @@ result = rlm.process(
 print(rlm.get_llm_status())
 ```
 
+### Multi-file processing
+
+```python
+result = rlm.process(
+    file_path=["/path/a.json", "/path/b.csv"],
+    query="Compare key trends"
+)
+```
+
 ### REPL mode
 
 ```python
@@ -128,37 +130,52 @@ with rlm.repl_session() as repl:
     result = repl.evaluate("llm_query('Find anomalies', context)")
 ```
 
+## Configuration
+
+Configuration is loaded from `.claude-plugin/plugin.json`. Defaults:
+
+- auto_trigger.file_size_kb (default: 50)
+- auto_trigger.token_count (default: 100000)
+- auto_trigger.file_count (default: 10)
+- processing.max_concurrent_agents (default: 8)
+- processing.chunk_overlap_percent (default: 10)
+- processing.recursion_depth_limit (default: 2)
+- processing.chunk_size (default: 50000)
+- models.extraction (default: haiku)
+- models.analysis (default: sonnet)
+- models.orchestration (default: sonnet)
+
 ## Architecture
 
 ```
 RLMPlugin
-├── ContextRouter         — decides when to activate, selects chunking strategy
-├── ParallelAgentManager  — parallel chunk processing + two-phase aggregation
-│   ├── Phase 1: per-chunk extraction (haiku, parallel)
-│   └── Phase 2: semantic synthesis (sonnet, single pass)
-├── LLMManager            — 6 backends with auto-fallback
-│   ├── AnthropicBackend
-│   ├── OpenAIBackend
-│   ├── OpenRouterBackend (tiered model selection)
-│   ├── LocalLLMBackend   (Ollama)
-│   ├── ClaudeCLIBackend  (subprocess)
-│   └── SimpleFallbackBackend (rule-based)
-└── REPLEngine            — interactive processing
+|-- ContextRouter         (decides when to activate, selects chunking strategy)
+|-- ParallelAgentManager  (parallel chunk processing + synthesis)
+|-- LLMManager            (Anthropic/OpenAI/OpenRouter/Local/Claude CLI/Fallback)
+`-- REPLEngine            (interactive processing)
 ```
 
 ### Chunking strategies
 
-| Data type | Strategy                 | How it splits                     |
-| --------- | ------------------------ | --------------------------------- |
-| JSON/YAML | Structural decomposition | By top-level keys                 |
-| CSV       | Row batching             | Groups of rows                    |
-| Logs      | Time window              | By timestamp ranges               |
-| Code      | File chunking            | By file with overlap              |
-| Text      | Token chunking           | Fixed-size with edge preservation |
+| Data type | Strategy | How it splits |
+| --- | --- | --- |
+| JSON/YAML/XML/CSV | Structural decomposition | Top-level keys / row batches |
+| Logs | Time window | Timestamp or line windows |
+| Text/Code | File chunking | Overlapping chunks |
 
-## Based on
+## Limitations
 
-[Recursive Language Models](https://arxiv.org/html/2512.24601v1) — programmatic examination and recursive processing of contexts that exceed LLM window limits.
+- Counts across chunks can be approximate; overlap and synthesis can skew totals.
+- Results depend on per-chunk extraction quality and the synthesis model.
+- Claude CLI backend can be slow or unavailable in some environments.
+
+## Reproduce the benchmark output
+
+```
+export OPENROUTER_API_KEY="sk-or-v1-..."
+python3 test_fixed_plugin.py
+python3 test_real_world_comparison.py
+```
 
 ## License
 
