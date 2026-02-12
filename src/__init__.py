@@ -116,11 +116,12 @@ class RLMPlugin:
         
         if query:
             results = self.agent_manager.process_chunks_sync(chunks, query)
-            aggregated = self.agent_manager.aggregate_results(results)
+            aggregated = self.agent_manager.aggregate_results(results, query=query)
             return {
                 "type": "rlm_query",
                 "strategy": strategy,
                 "chunks_processed": len(chunks),
+                "synthesis_applied": aggregated.get("synthesis_applied", False),
                 "result": aggregated
             }
         else:
@@ -130,12 +131,12 @@ class RLMPlugin:
                 "chunks": len(chunks),
                 "metadata": metadata
             }
-    
+
     def _execute_strategy_on_content(
-        self, 
-        content: str, 
-        strategy: str, 
-        metadata: Dict, 
+        self,
+        content: str,
+        strategy: str,
+        metadata: Dict,
         query: Optional[str]
     ) -> Dict[str, Any]:
         """Execute RLM strategy on content string"""
@@ -143,16 +144,17 @@ class RLMPlugin:
             data_type="text",
             size=len(content)
         )
-        
+
         chunks = processor.decompose_content(content, metadata)
-        
+
         if query:
             results = self.agent_manager.process_chunks_sync(chunks, query)
-            aggregated = self.agent_manager.aggregate_results(results)
+            aggregated = self.agent_manager.aggregate_results(results, query=query)
             return {
                 "type": "rlm_query",
                 "strategy": strategy,
                 "chunks_processed": len(chunks),
+                "synthesis_applied": aggregated.get("synthesis_applied", False),
                 "result": aggregated
             }
         else:

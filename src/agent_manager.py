@@ -254,33 +254,126 @@ KEY FINDINGS:"""
             batches.append(tasks[i:i+batch_size])
         return batches
     
-    def aggregate_results(self, results: List[Result]) -> Dict[str, Any]:
-        """Aggregate results from multiple chunks"""
+    def aggregate_results(self, results: List[Result], query: Optional[str] = None) -> Dict[str, Any]:
+        """Aggregate results from multiple chunks with semantic synthesis.
+
+        Two-phase aggregation:
+        1. Collect per-chunk findings into a combined text
+        2. If a query was provided AND an LLM is available, run a synthesis
+           pass that merges findings into a single coherent answer
+        """
         successful = [r for r in results if r.error is None]
         failed = [r for r in results if r.error is not None]
-        
+
         total_time = sum(r.processing_time_ms for r in results)
-        
+
+        # Phase 1: mechanical aggregation
         if all(isinstance(r.content, str) for r in successful):
-            aggregated_content = '\n\n'.join(
+            raw_aggregated = '\n\n'.join(
                 f"[Chunk {r.chunk_id}]:\n{r.content}"
                 for r in successful
             )
         elif all(isinstance(r.content, dict) for r in successful):
-            aggregated_content = {}
+            raw_aggregated = {}
             for r in successful:
                 if isinstance(r.content, dict):
-                    aggregated_content.update(r.content)
+                    raw_aggregated.update(r.content)
         else:
-            aggregated_content = [r.content for r in successful]
-        
+            raw_aggregated = [r.content for r in successful]
+
+        # Phase 2: semantic synthesis (only when we have a query and string results)
+        synthesized = None
+        synthesis_time_ms = 0
+        synthesis_model = None
+
+        if (query
+            and isinstance(raw_aggregated, str)
+            and len(successful) > 1
+            and not self._is_fallback_only(successful)):
+
+            synthesized, synthesis_time_ms, synthesis_model = self._synthesize(
+                raw_aggregated, query, len(successful)
+            )
+            total_time += synthesis_time_ms
+
         return {
-            "aggregated": aggregated_content,
+            "aggregated": synthesized or raw_aggregated,
+            "raw_chunks": raw_aggregated if synthesized else None,
+            "synthesis_applied": synthesized is not None,
+            "synthesis_model": synthesis_model,
             "chunks_processed": len(successful),
             "chunks_failed": len(failed),
             "total_processing_time_ms": total_time,
             "errors": [{"chunk": r.chunk_id, "error": r.error} for r in failed]
         }
+
+    def _is_fallback_only(self, results: List[Result]) -> bool:
+        """Check if all results came from the rule-based fallback (no real LLM)."""
+        return all(
+            r.model_used and 'fallback' in str(r.model_used).lower()
+            for r in results
+        )
+
+    def _synthesize(self, chunk_findings: str, query: str, num_chunks: int) -> tuple:
+        """Run a synthesis pass over all chunk findings to produce a unified answer.
+
+        Returns (synthesized_text, time_ms, model_used) or (None, 0, None) on failure.
+        """
+        # Cap input to synthesis prompt — keep it under 50K chars to stay within
+        # context limits for the synthesis model. If findings are larger, truncate
+        # each chunk section proportionally.
+        max_synthesis_input = 50_000
+        if len(chunk_findings) > max_synthesis_input:
+            # Truncate proportionally: keep first N chars of each chunk section
+            per_chunk_budget = max_synthesis_input // max(num_chunks, 1)
+            sections = chunk_findings.split('\n\n[Chunk ')
+            truncated = []
+            for i, section in enumerate(sections):
+                if i == 0:
+                    truncated.append(section[:per_chunk_budget])
+                else:
+                    truncated.append('[Chunk ' + section[:per_chunk_budget])
+            chunk_findings = '\n\n'.join(truncated)
+
+        synthesis_prompt = f"""You are synthesizing findings from {num_chunks} data chunks that were analyzed independently. Each chunk only saw a portion of the original data, so individual chunks may have partial answers.
+
+ORIGINAL QUERY: {query}
+
+FINDINGS FROM ALL CHUNKS:
+{chunk_findings}
+
+INSTRUCTIONS:
+- Combine all findings into a single, coherent answer to the original query
+- Resolve any contradictions between chunks (later chunks may have more complete data)
+- Aggregate counts, totals, and lists across all chunks
+- Do NOT say "chunk 0 found X, chunk 3 found Y" — synthesize into one unified answer
+- If chunks report partial counts (e.g., "27 records in this chunk"), sum them for the total
+- Preserve specific details: names, numbers, dates, identifiers
+- Be direct and concise
+
+SYNTHESIZED ANSWER:"""
+
+        start = time.time()
+        try:
+            # Use sonnet-tier for synthesis (better reasoning than haiku)
+            response = self.llm_manager.query(synthesis_prompt, model="sonnet")
+            elapsed = (time.time() - start) * 1000
+
+            if response.error:
+                # Try haiku as fallback
+                response = self.llm_manager.query(synthesis_prompt, model="haiku")
+                elapsed = (time.time() - start) * 1000
+
+                if response.error:
+                    logging.warning(f"Synthesis failed: {response.error}")
+                    return (None, 0, None)
+
+            logging.info(f"Synthesis completed in {elapsed:.0f}ms using {response.model_used}")
+            return (response.content, elapsed, response.model_used)
+
+        except Exception as e:
+            logging.error(f"Synthesis exception: {e}")
+            return (None, 0, None)
     
     def cleanup(self):
         """Cleanup resources"""
